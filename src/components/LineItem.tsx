@@ -1,4 +1,4 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useMemo } from "react";
 import type { Line } from "../types";
 import { useStore } from "../store/useStore";
 import { distancePointToPoint, getSvgPoint } from "../utils/geometry";
@@ -8,7 +8,7 @@ interface Props extends React.SVGProps<SVGLineElement> {
 }
 
 export function LineItem({ line, stroke = "#61dafb", strokeWidth = 2, ...rest }: Props) {
-  const { mode, deleteLine, setHoverLine, setHoverPoint, hoverLineId, toggleSelectLine, beginDragFromLine, updateDrag, endDrag, selectedLineIds, shiftSelectActive } = useStore();
+  const { mode, deleteLine, setHoverLine, setHoverPoint, hoverLineId, toggleSelectLine, beginDragFromLine, updateDrag, endDrag, selectedLineIds, shiftSelectActive, groups, lines } = useStore();
   const handleClick = useCallback((e: React.MouseEvent<SVGLineElement>) => {
     if (mode === "delete") {
       e.stopPropagation();
@@ -46,8 +46,35 @@ export function LineItem({ line, stroke = "#61dafb", strokeWidth = 2, ...rest }:
     else setHoverPoint(null);
   }, [line.p1, line.p2, mode, setHoverPoint]);
 
-  const isHovered = hoverLineId === line.id && mode === "focus";
-  const isSelected = selectedLineIds.includes(line.id) && mode === "edit";
+  // Group-aware hover: if a hovered line belongs to a group, highlight all members
+  const hoveredGroupMemberIds = useMemo(() => {
+    if (!hoverLineId) return null;
+    const hovered = lines.find((l) => l.id === hoverLineId);
+    if (!hovered?.groupId) return null;
+    const g = groups.find((gg) => gg.id === hovered.groupId);
+    return g ? new Set(g.memberIds) : null;
+  }, [groups, hoverLineId, lines]);
+
+  const isHovered = mode === "focus" && (hoverLineId === line.id || (hoveredGroupMemberIds?.has(line.id) ?? false));
+
+  // Group-aware selection visualization: if any selected line belongs to a group, highlight all its members
+  const selectedWithGroups = useMemo(() => {
+    if (selectedLineIds.length === 0) return new Set<string>();
+    const result = new Set<string>(selectedLineIds);
+    const selectedGroups = new Set(
+      selectedLineIds
+        .map((id) => lines.find((l) => l.id === id)?.groupId)
+        .filter(Boolean) as string[]
+    );
+    if (selectedGroups.size === 0) return result;
+    for (const gid of selectedGroups) {
+      const g = groups.find((gg) => gg.id === gid);
+      if (g) g.memberIds.forEach((m) => result.add(m));
+    }
+    return result;
+  }, [groups, lines, selectedLineIds]);
+
+  const isSelected = mode === "edit" && selectedWithGroups.has(line.id);
   const visualStroke = isHovered ? "#ffd166" : isSelected ? "#8ecae6" : stroke;
   const visualWidth = isHovered || isSelected ? (typeof strokeWidth === "number" ? strokeWidth + 1.5 : strokeWidth) : strokeWidth;
 
