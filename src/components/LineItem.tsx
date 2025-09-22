@@ -8,12 +8,20 @@ interface Props extends React.SVGProps<SVGLineElement> {
 }
 
 export function LineItem({ line, stroke = "#61dafb", strokeWidth = 2, ...rest }: Props) {
-  const { mode, deleteLine, setHoverLine, setHoverPoint, hoverLineId, toggleSelectLine, beginDragFromLine, updateDrag, endDrag } = useStore();
+  const { mode, deleteLine, setHoverLine, setHoverPoint, hoverLineId, toggleSelectLine, beginDragFromLine, updateDrag, endDrag, selectedLineIds, shiftSelectActive } = useStore();
   const handleClick = useCallback((e: React.MouseEvent<SVGLineElement>) => {
-    if (mode !== "delete") return;
-    e.stopPropagation();
-    deleteLine(line.id);
-  }, [deleteLine, line.id, mode]);
+    if (mode === "delete") {
+      e.stopPropagation();
+      deleteLine(line.id);
+      return;
+    }
+    if (mode === "edit" || shiftSelectActive) {
+      e.stopPropagation();
+      const additive = e.shiftKey;
+      toggleSelectLine(line.id, additive);
+      return;
+    }
+  }, [deleteLine, line.id, mode, toggleSelectLine, shiftSelectActive]);
 
   const handleEnter = useCallback(() => {
     if (mode === "focus") setHoverLine(line.id);
@@ -39,8 +47,9 @@ export function LineItem({ line, stroke = "#61dafb", strokeWidth = 2, ...rest }:
   }, [line.p1, line.p2, mode, setHoverPoint]);
 
   const isHovered = hoverLineId === line.id && mode === "focus";
-  const visualStroke = isHovered ? "#ffd166" : stroke;
-  const visualWidth = isHovered ? (typeof strokeWidth === "number" ? strokeWidth + 1.5 : strokeWidth) : strokeWidth;
+  const isSelected = selectedLineIds.includes(line.id) && mode === "edit";
+  const visualStroke = isHovered ? "#ffd166" : isSelected ? "#8ecae6" : stroke;
+  const visualWidth = isHovered || isSelected ? (typeof strokeWidth === "number" ? strokeWidth + 1.5 : strokeWidth) : strokeWidth;
 
   const handlePointerDown = useCallback((e: React.PointerEvent<SVGLineElement>) => {
     if (mode === "edit") {
@@ -65,12 +74,7 @@ export function LineItem({ line, stroke = "#61dafb", strokeWidth = 2, ...rest }:
     }
   }, [endDrag, mode]);
 
-  const handleSelect = useCallback((e: React.MouseEvent<SVGLineElement>) => {
-    if (mode !== "edit") return;
-    // Shift+click toggles selection, click without Shift selects single
-    const additive = e.shiftKey;
-    toggleSelectLine(line.id, additive);
-  }, [line.id, mode, toggleSelectLine]);
+  
 
   return (
     <line
@@ -84,9 +88,8 @@ export function LineItem({ line, stroke = "#61dafb", strokeWidth = 2, ...rest }:
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMoveDrag}
       onPointerUp={handlePointerUp}
-      onDoubleClick={handleSelect}
       onClick={handleClick}
-      style={{ cursor: mode === "delete" ? "pointer" : undefined }}
+      style={{ cursor: mode === "delete" ? "pointer" : shiftSelectActive ? "cell" : undefined }}
       stroke={visualStroke}
       strokeWidth={visualWidth}
       {...rest}

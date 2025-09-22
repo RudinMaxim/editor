@@ -14,17 +14,20 @@ interface EditorState {
   selectedLineIds: string[];
   dragIds: string[] | null;
   dragLast: Point | null;
+  shiftSelectActive: boolean;
   // history
   history: EditorSnapshot[];
   historyIndex: number;
   historyLimit: number;
   setMode: (mode: Mode) => void;
+  setShiftSelectActive: (active: boolean) => void;
   setHoverPoint: (p: Point | null) => void;
   setHoverLine: (id: string | null) => void;
   toggleAxes: () => void;
   toggleSelectLine: (id: string, additive: boolean) => void;
   clearSelection: () => void;
   createGroupFromSelection: () => void;
+  ungroupSelected: () => void;
   beginDragFromLine: (lineId: string, start: Point) => void;
   updateDrag: (current: Point) => void;
   endDrag: () => void;
@@ -50,10 +53,12 @@ export const useStore = create<EditorState>((set, get) => ({
   selectedLineIds: [],
   dragIds: null,
   dragLast: null,
+  shiftSelectActive: false,
   history: [{ lines: [], groups: [], selectedLineIds: [] }],
   historyIndex: 0,
   historyLimit: 200,
   setMode: (mode) => set({ mode }),
+  setShiftSelectActive: (active) => set({ shiftSelectActive: active }),
   setHoverPoint: (p) => set({ hoverPoint: p }),
   setHoverLine: (id) => set({ hoverLineId: id }),
   toggleAxes: () => set((s) => ({ showAxes: !s.showAxes })),
@@ -77,12 +82,45 @@ export const useStore = create<EditorState>((set, get) => ({
   }),
   createGroupFromSelection: () => set((s) => {
     if (s.selectedLineIds.length < 2) return {} as any;
+    // Expand selection by including all members of any groups that selected lines belong to
+    const selectedSet = new Set(s.selectedLineIds);
+    for (const lineId of s.selectedLineIds) {
+      const line = s.lines.find((l) => l.id === lineId);
+      if (line?.groupId) {
+        const g = s.groups.find((gg) => gg.id === line.groupId);
+        if (g) g.memberIds.forEach((m) => selectedSet.add(m));
+      }
+    }
+    const mergedMemberIds = Array.from(selectedSet);
     const id = uuidv4();
-    const newGroup: Group = { id, memberIds: [...s.selectedLineIds] };
-    const updatedLines = s.lines.map((l) => (s.selectedLineIds.includes(l.id) ? { ...l, groupId: id } : l));
+    const newGroup: Group = { id, memberIds: mergedMemberIds };
+    // Remove overlapped groups
+    const overlappedGroupIds = new Set(
+      s.groups.filter((g) => g.memberIds.some((m) => selectedSet.has(m))).map((g) => g.id)
+    );
+    const remainingGroups = s.groups.filter((g) => !overlappedGroupIds.has(g.id));
+    // Assign new groupId to merged members; clear groupId for others that were in removed groups but not selected (should not happen as we expanded)
+    const updatedLines = s.lines.map((l) =>
+      mergedMemberIds.includes(l.id) ? { ...l, groupId: id } : overlappedGroupIds.has(l.groupId || "") ? { ...l, groupId: undefined } : l
+    );
     const baseHistory = s.history.slice(0, s.historyIndex + 1);
-    const snap = { lines: updatedLines.map(cloneLine), groups: [...s.groups, newGroup].map(cloneGroup), selectedLineIds: [...s.selectedLineIds] };
-    return { groups: [...s.groups, newGroup], lines: updatedLines, history: [...baseHistory, snap], historyIndex: baseHistory.length };
+    const nextGroups = [...remainingGroups, newGroup];
+    const snap = { lines: updatedLines.map(cloneLine), groups: nextGroups.map(cloneGroup), selectedLineIds: [...mergedMemberIds] };
+    return { groups: nextGroups, lines: updatedLines, selectedLineIds: mergedMemberIds, history: [...baseHistory, snap], historyIndex: baseHistory.length };
+  }),
+  ungroupSelected: () => set((s) => {
+    if (s.selectedLineIds.length === 0) return {} as any;
+    // Find groups involved
+    const involvedGroupIds = new Set(
+      s.selectedLineIds.map((id) => s.lines.find((l) => l.id === id)?.groupId).filter(Boolean) as string[]
+    );
+    if (involvedGroupIds.size === 0) return {} as any;
+    // Remove groupId from all members of involved groups and drop groups entirely
+    const updatedLines = s.lines.map((l) => (involvedGroupIds.has(l.groupId || "") ? { ...l, groupId: undefined } : l));
+    const remainingGroups = s.groups.filter((g) => !involvedGroupIds.has(g.id));
+    const baseHistory = s.history.slice(0, s.historyIndex + 1);
+    const snap = { lines: updatedLines.map(cloneLine), groups: remainingGroups.map(cloneGroup), selectedLineIds: [...s.selectedLineIds] };
+    return { lines: updatedLines, groups: remainingGroups, history: [...baseHistory, snap], historyIndex: baseHistory.length };
   }),
   beginDragFromLine: (lineId, start) => set((s) => {
     const line = s.lines.find((l) => l.id === lineId);
@@ -150,10 +188,16 @@ export const useStore = create<EditorState>((set, get) => ({
   cancelTemp: () => set({ tempStartPoint: null, tempEndPoint: null }),
   deleteLine: (id: string) => set((s) => {
     const lines = s.lines.filter((l) => l.id !== id);
+    // Update groups membership
+    let groups = s.groups.map((g) => ({ ...g, memberIds: g.memberIds.filter((m) => m !== id) }));
+    // Drop groups with <2 members and clear groupId on lone member if any
+    const droppedGroupIds = new Set(groups.filter((g) => g.memberIds.length < 2).map((g) => g.id));
+    groups = groups.filter((g) => !droppedGroupIds.has(g.id));
+    const cleanedLines = lines.map((l) => (droppedGroupIds.has(l.groupId || "") ? { ...l, groupId: undefined } : l));
     const baseHistory = s.history.slice(0, s.historyIndex + 1);
-    const snap: EditorSnapshot = { lines: lines.map(cloneLine), groups: s.groups.map(cloneGroup), selectedLineIds: s.selectedLineIds.filter((x) => x !== id) };
+    const snap: EditorSnapshot = { lines: cleanedLines.map(cloneLine), groups: groups.map(cloneGroup), selectedLineIds: s.selectedLineIds.filter((x) => x !== id) };
     const capped = capHistory([...baseHistory, snap], s.historyLimit);
-    return { lines, selectedLineIds: snap.selectedLineIds, history: capped, historyIndex: capped.length - 1 };
+    return { lines: cleanedLines, groups, selectedLineIds: snap.selectedLineIds, history: capped, historyIndex: capped.length - 1 };
   }),
   clear: () => set((s) => {
     const baseHistory = s.history.slice(0, s.historyIndex + 1);
