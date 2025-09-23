@@ -6,5 +6,3 @@ export * from "./entities/line/ui/LineItem";
 export * from "./widgets/canvas";
 export * from "./widgets/status-bar";
 export * from "./widgets/toolbar";
-
-

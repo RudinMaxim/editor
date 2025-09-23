@@ -36,7 +36,7 @@ export function useCanvas() {
       if (mode !== "create") return;
       beginLine({ x: loc.x, y: loc.y });
     },
-    [beginMarquee, beginLine, mode, shiftSelectActive]
+    [beginMarquee, beginLine, mode, shiftSelectActive],
   );
 
   const handlePointerMove = useCallback(
@@ -51,7 +51,7 @@ export function useCanvas() {
       if (!tempStartPoint) return;
       updateTempEnd({ x: loc.x, y: loc.y });
     },
-    [mode, tempStartPoint, updateTempEnd, shiftSelectActive, updateMarquee]
+    [mode, tempStartPoint, updateTempEnd, shiftSelectActive, updateMarquee],
   );
 
   const handlePointerUp = useCallback(() => {
@@ -79,14 +79,14 @@ export function useCanvas() {
       }
       if (e.key === "Shift") setShiftSelectActive(true);
     },
-    [cancelTemp]
+    [cancelTemp],
   );
 
   const handleKeyUp = useCallback(
     (e: React.KeyboardEvent<SVGSVGElement>) => {
       if (e.key === "Shift") setShiftSelectActive(false);
     },
-    [setShiftSelectActive]
+    [setShiftSelectActive],
   );
 
   useEffect(() => {

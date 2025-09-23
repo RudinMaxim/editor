@@ -1,5 +1,11 @@
 import { create } from "zustand";
-import type { EditorSnapshot, Group, Line, Mode, Point } from "../../../shared/types";
+import type {
+  EditorSnapshot,
+  Group,
+  Line,
+  Mode,
+  Point,
+} from "../../../shared/types";
 import { v4 as uuidv4 } from "uuid";
 import { doesLineIntersectRect } from "../../../shared/lib";
 
@@ -47,6 +53,8 @@ interface EditorState {
   clear: () => void;
 }
 
+const HISTORY_LIMIT_DEFAULT = 200;
+
 export const useEditorStore = create<EditorState>((set, get) => ({
   mode: "create",
   lines: [],
@@ -64,45 +72,72 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   marqueeEnd: null,
   history: [{ lines: [], groups: [], selectedLineIds: [] }],
   historyIndex: 0,
-  historyLimit: 200,
+  historyLimit: HISTORY_LIMIT_DEFAULT,
   setMode: (mode) => set({ mode }),
   setShiftSelectActive: (active) => set({ shiftSelectActive: active }),
   beginMarquee: (start) => set({ marqueeStart: start, marqueeEnd: start }),
   updateMarquee: (current) => set({ marqueeEnd: current }),
-  commitMarquee: () => set((s) => {
-    if (!s.marqueeStart || !s.marqueeEnd) return {} as any;
+  commitMarquee: () => {
+    const s = get();
+    if (!s.marqueeStart || !s.marqueeEnd) return;
     const a = s.marqueeStart;
     const b = s.marqueeEnd;
-    const selectedLineIds = s.lines.filter((l) => doesLineIntersectRect(l, a, b)).map((l) => l.id);
+    const selectedLineIds = s.lines
+      .filter((l) => doesLineIntersectRect(l, a, b))
+      .map((l) => l.id);
     const baseHistory = s.history.slice(0, s.historyIndex + 1);
-    const snap = { lines: s.lines.map(cloneLine), groups: s.groups.map(cloneGroup), selectedLineIds: [...selectedLineIds] };
-    return { selectedLineIds, marqueeStart: null, marqueeEnd: null, history: [...baseHistory, snap], historyIndex: baseHistory.length };
-  }),
+    const snap = makeSnapshot(s.lines, s.groups, selectedLineIds);
+    set({
+      selectedLineIds,
+      marqueeStart: null,
+      marqueeEnd: null,
+      history: [...baseHistory, snap],
+      historyIndex: baseHistory.length,
+    });
+  },
   cancelMarquee: () => set({ marqueeStart: null, marqueeEnd: null }),
   setHoverPoint: (p) => set({ hoverPoint: p }),
   setHoverLine: (id) => set({ hoverLineId: id }),
   toggleAxes: () => set((s) => ({ showAxes: !s.showAxes })),
-  toggleSelectLine: (id, additive) => set((s) => {
-    const already = s.selectedLineIds.includes(id);
-    if (additive) {
-      const selectedLineIds = already ? s.selectedLineIds.filter((x) => x !== id) : [...s.selectedLineIds, id];
+  toggleSelectLine: (id, additive) =>
+    set((s) => {
+      const already = s.selectedLineIds.includes(id);
+      if (additive) {
+        const selectedLineIds = already
+          ? s.selectedLineIds.filter((x) => x !== id)
+          : [...s.selectedLineIds, id];
+        const baseHistory = s.history.slice(0, s.historyIndex + 1);
+        const snap = makeSnapshot(s.lines, s.groups, selectedLineIds);
+        return {
+          selectedLineIds,
+          history: [...baseHistory, snap],
+          historyIndex: baseHistory.length,
+        };
+      }
+      const selectedLineIds =
+        already && s.selectedLineIds.length === 1 ? [] : [id];
       const baseHistory = s.history.slice(0, s.historyIndex + 1);
-      const snap = { lines: s.lines.map(cloneLine), groups: s.groups.map(cloneGroup), selectedLineIds: [...selectedLineIds] };
-      return { selectedLineIds, history: [...baseHistory, snap], historyIndex: baseHistory.length };
-    }
-    const selectedLineIds = already && s.selectedLineIds.length === 1 ? [] : [id];
-    const baseHistory = s.history.slice(0, s.historyIndex + 1);
-    const snap = { lines: s.lines.map(cloneLine), groups: s.groups.map(cloneGroup), selectedLineIds: [...selectedLineIds] };
-    return { selectedLineIds, history: [...baseHistory, snap], historyIndex: baseHistory.length };
-  }),
-  clearSelection: () => set((s) => {
-    const baseHistory = s.history.slice(0, s.historyIndex + 1);
-    const snap = { lines: s.lines.map(cloneLine), groups: s.groups.map(cloneGroup), selectedLineIds: [] as string[] };
-    return { selectedLineIds: [], history: [...baseHistory, snap], historyIndex: baseHistory.length };
-  }),
-  createGroupFromSelection: () => set((s) => {
-    if (s.selectedLineIds.length < 2) return {} as any;
-    const selectedSet = new Set(s.selectedLineIds);
+      const snap = makeSnapshot(s.lines, s.groups, selectedLineIds);
+      return {
+        selectedLineIds,
+        history: [...baseHistory, snap],
+        historyIndex: baseHistory.length,
+      };
+    }),
+  clearSelection: () =>
+    set((s) => {
+      const baseHistory = s.history.slice(0, s.historyIndex + 1);
+      const snap = makeSnapshot(s.lines, s.groups, []);
+      return {
+        selectedLineIds: [],
+        history: [...baseHistory, snap],
+        historyIndex: baseHistory.length,
+      };
+    }),
+  createGroupFromSelection: () => {
+    const s = get();
+    if (s.selectedLineIds.length < 2) return;
+    const selectedSet = new Set<string>(s.selectedLineIds);
     for (const lineId of s.selectedLineIds) {
       const line = s.lines.find((l) => l.id === lineId);
       if (line?.groupId) {
@@ -114,42 +149,71 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const id = uuidv4();
     const newGroup: Group = { id, memberIds: mergedMemberIds };
     const overlappedGroupIds = new Set(
-      s.groups.filter((g) => g.memberIds.some((m) => selectedSet.has(m))).map((g) => g.id)
+      s.groups
+        .filter((g) => g.memberIds.some((m) => selectedSet.has(m)))
+        .map((g) => g.id),
     );
-    const remainingGroups = s.groups.filter((g) => !overlappedGroupIds.has(g.id));
+    const remainingGroups = s.groups.filter(
+      (g) => !overlappedGroupIds.has(g.id),
+    );
     const updatedLines = s.lines.map((l) =>
-      mergedMemberIds.includes(l.id) ? { ...l, groupId: id } : overlappedGroupIds.has(l.groupId || "") ? { ...l, groupId: undefined } : l
+      mergedMemberIds.includes(l.id)
+        ? { ...l, groupId: id }
+        : overlappedGroupIds.has(l.groupId ?? "")
+          ? { ...l, groupId: undefined }
+          : l,
     );
     const baseHistory = s.history.slice(0, s.historyIndex + 1);
     const nextGroups = [...remainingGroups, newGroup];
-    const snap = { lines: updatedLines.map(cloneLine), groups: nextGroups.map(cloneGroup), selectedLineIds: [...mergedMemberIds] };
-    return { groups: nextGroups, lines: updatedLines, selectedLineIds: mergedMemberIds, history: [...baseHistory, snap], historyIndex: baseHistory.length };
-  }),
-  ungroupSelected: () => set((s) => {
-    if (s.selectedLineIds.length === 0) return {} as any;
+    const snap = makeSnapshot(updatedLines, nextGroups, mergedMemberIds);
+    set({
+      groups: nextGroups,
+      lines: updatedLines,
+      selectedLineIds: mergedMemberIds,
+      history: [...baseHistory, snap],
+      historyIndex: baseHistory.length,
+    });
+  },
+  ungroupSelected: () => {
+    const s = get();
+    if (s.selectedLineIds.length === 0) return;
     const involvedGroupIds = new Set(
-      s.selectedLineIds.map((id) => s.lines.find((l) => l.id === id)?.groupId).filter(Boolean) as string[]
+      s.selectedLineIds
+        .map((id) => s.lines.find((l) => l.id === id)?.groupId)
+        .filter((gid): gid is string => Boolean(gid)),
     );
-    if (involvedGroupIds.size === 0) return {} as any;
-    const updatedLines = s.lines.map((l) => (involvedGroupIds.has(l.groupId || "") ? { ...l, groupId: undefined } : l));
+    if (involvedGroupIds.size === 0) return;
+    const updatedLines = s.lines.map((l) =>
+      involvedGroupIds.has(l.groupId ?? "") ? { ...l, groupId: undefined } : l,
+    );
     const remainingGroups = s.groups.filter((g) => !involvedGroupIds.has(g.id));
     const baseHistory = s.history.slice(0, s.historyIndex + 1);
-    const snap = { lines: updatedLines.map(cloneLine), groups: remainingGroups.map(cloneGroup), selectedLineIds: [...s.selectedLineIds] };
-    return { lines: updatedLines, groups: remainingGroups, history: [...baseHistory, snap], historyIndex: baseHistory.length };
-  }),
-  beginDragFromLine: (lineId, start) => set((s) => {
-    const line = s.lines.find((l) => l.id === lineId);
-    let ids: string[] = [];
-    if (line?.groupId) {
-      const group = s.groups.find((g) => g.id === line.groupId);
-      ids = group ? [...group.memberIds] : [lineId];
-    } else if (s.selectedLineIds.includes(lineId) && s.selectedLineIds.length > 0) {
-      ids = [...s.selectedLineIds];
-    } else {
-      ids = [lineId];
-    }
-    return { dragIds: ids, dragLast: start };
-  }),
+    const snap = makeSnapshot(updatedLines, remainingGroups, s.selectedLineIds);
+    set({
+      lines: updatedLines,
+      groups: remainingGroups,
+      history: [...baseHistory, snap],
+      historyIndex: baseHistory.length,
+    });
+  },
+  beginDragFromLine: (lineId, start) =>
+    set((s) => {
+      const line = s.lines.find((l) => l.id === lineId);
+      let ids: string[] = [];
+      if (!line) return { dragIds: null, dragLast: null };
+      if (line.groupId) {
+        const group = s.groups.find((g) => g.id === line.groupId);
+        ids = group ? [...group.memberIds] : [lineId];
+      } else if (
+        s.selectedLineIds.includes(lineId) &&
+        s.selectedLineIds.length > 0
+      ) {
+        ids = [...s.selectedLineIds];
+      } else {
+        ids = [lineId];
+      }
+      return { dragIds: ids, dragLast: start };
+    }),
   updateDrag: (current) => {
     const { dragIds, dragLast } = get();
     if (!dragIds || !dragLast) return;
@@ -157,29 +221,57 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const dy = current.y - dragLast.y;
     if (dx === 0 && dy === 0) return;
     set((s) => ({
-      lines: s.lines.map((l) => (dragIds.includes(l.id) ? { ...l, p1: { x: l.p1.x + dx, y: l.p1.y + dy }, p2: { x: l.p2.x + dx, y: l.p2.y + dy } } : l))
+      lines: s.lines.map((l) =>
+        dragIds.includes(l.id)
+          ? {
+              ...l,
+              p1: { x: l.p1.x + dx, y: l.p1.y + dy },
+              p2: { x: l.p2.x + dx, y: l.p2.y + dy },
+            }
+          : l,
+      ),
     }));
     set({ dragLast: current });
   },
-  endDrag: () => set((s) => {
-    const baseHistory = s.history.slice(0, s.historyIndex + 1);
-    const snap: EditorSnapshot = { lines: s.lines.map(cloneLine), groups: s.groups.map(cloneGroup), selectedLineIds: [...s.selectedLineIds] };
-    const capped = capHistory([...baseHistory, snap], s.historyLimit);
-    return { dragIds: null, dragLast: null, history: capped, historyIndex: capped.length - 1 };
-  }),
+  endDrag: () =>
+    set((s) => {
+      const baseHistory = s.history.slice(0, s.historyIndex + 1);
+      const snap: EditorSnapshot = makeSnapshot(
+        s.lines,
+        s.groups,
+        s.selectedLineIds,
+      );
+      const capped = capHistory([...baseHistory, snap], s.historyLimit);
+      return {
+        dragIds: null,
+        dragLast: null,
+        history: capped,
+        historyIndex: capped.length - 1,
+      };
+    }),
   undo: () => {
     const { historyIndex } = get();
     if (historyIndex <= 0) return;
     const target = historyIndex - 1;
     const snapshot = get().history[target];
-    set({ lines: snapshot.lines.map(cloneLine), groups: snapshot.groups.map(cloneGroup), selectedLineIds: [...snapshot.selectedLineIds], historyIndex: target });
+    set({
+      lines: snapshot.lines.map(cloneLine),
+      groups: snapshot.groups.map(cloneGroup),
+      selectedLineIds: [...snapshot.selectedLineIds],
+      historyIndex: target,
+    });
   },
   redo: () => {
     const { history, historyIndex } = get();
     if (historyIndex >= history.length - 1) return;
     const target = historyIndex + 1;
     const snapshot = history[target];
-    set({ lines: snapshot.lines.map(cloneLine), groups: snapshot.groups.map(cloneGroup), selectedLineIds: [...snapshot.selectedLineIds], historyIndex: target });
+    set({
+      lines: snapshot.lines.map(cloneLine),
+      groups: snapshot.groups.map(cloneGroup),
+      selectedLineIds: [...snapshot.selectedLineIds],
+      historyIndex: target,
+    });
   },
   beginLine: (p) => set({ tempStartPoint: p, tempEndPoint: p }),
   updateTempEnd: (p) => set({ tempEndPoint: p }),
@@ -194,42 +286,100 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((s) => {
       const lines = [...s.lines, newLine];
       const baseHistory = s.history.slice(0, s.historyIndex + 1);
-      const snap: EditorSnapshot = { lines: lines.map(cloneLine), groups: s.groups.map(cloneGroup), selectedLineIds: [...s.selectedLineIds] };
+      const snap: EditorSnapshot = makeSnapshot(
+        lines,
+        s.groups,
+        s.selectedLineIds,
+      );
       const capped = capHistory([...baseHistory, snap], s.historyLimit);
-      return { lines, tempStartPoint: null, tempEndPoint: null, history: capped, historyIndex: capped.length - 1 };
+      return {
+        lines,
+        tempStartPoint: null,
+        tempEndPoint: null,
+        history: capped,
+        historyIndex: capped.length - 1,
+      };
     });
   },
   cancelTemp: () => set({ tempStartPoint: null, tempEndPoint: null }),
-  deleteLine: (id: string) => set((s) => {
-    const lines = s.lines.filter((l) => l.id !== id);
-    let groups = s.groups.map((g) => ({ ...g, memberIds: g.memberIds.filter((m) => m !== id) }));
-    const droppedGroupIds = new Set(groups.filter((g) => g.memberIds.length < 2).map((g) => g.id));
-    groups = groups.filter((g) => !droppedGroupIds.has(g.id));
-    const cleanedLines = lines.map((l) => (droppedGroupIds.has(l.groupId || "") ? { ...l, groupId: undefined } : l));
-    const baseHistory = s.history.slice(0, s.historyIndex + 1);
-    const snap: EditorSnapshot = { lines: cleanedLines.map(cloneLine), groups: groups.map(cloneGroup), selectedLineIds: s.selectedLineIds.filter((x) => x !== id) };
-    const capped = capHistory([...baseHistory, snap], s.historyLimit);
-    return { lines: cleanedLines, groups, selectedLineIds: snap.selectedLineIds, history: capped, historyIndex: capped.length - 1 };
-  }),
-  clear: () => set((s) => {
-    const baseHistory = s.history.slice(0, s.historyIndex + 1);
-    const snap: EditorSnapshot = { lines: [] as Line[], groups: [] as Group[], selectedLineIds: [] as string[] };
-    const capped = capHistory([...baseHistory, snap], s.historyLimit);
-    return { lines: [], groups: [], selectedLineIds: [], history: capped, historyIndex: capped.length - 1 };
-  }),
+  deleteLine: (id: string) =>
+    set((s) => {
+      const lines = s.lines.filter((l) => l.id !== id);
+      let groups = s.groups.map((g) => ({
+        ...g,
+        memberIds: g.memberIds.filter((m) => m !== id),
+      }));
+      const droppedGroupIds = new Set(
+        groups.filter((g) => g.memberIds.length < 2).map((g) => g.id),
+      );
+      groups = groups.filter((g) => !droppedGroupIds.has(g.id));
+      const cleanedLines = lines.map((l) =>
+        droppedGroupIds.has(l.groupId ?? "") ? { ...l, groupId: undefined } : l,
+      );
+      const baseHistory = s.history.slice(0, s.historyIndex + 1);
+      const nextSelected = s.selectedLineIds.filter((x) => x !== id);
+      const snap: EditorSnapshot = makeSnapshot(
+        cleanedLines,
+        groups,
+        nextSelected,
+      );
+      const capped = capHistory([...baseHistory, snap], s.historyLimit);
+      return {
+        lines: cleanedLines,
+        groups,
+        selectedLineIds: nextSelected,
+        history: capped,
+        historyIndex: capped.length - 1,
+      };
+    }),
+  clear: () =>
+    set((s) => {
+      const baseHistory = s.history.slice(0, s.historyIndex + 1);
+      const snap: EditorSnapshot = makeSnapshot([], [], []);
+      const capped = capHistory([...baseHistory, snap], s.historyLimit);
+      return {
+        lines: [],
+        groups: [],
+        selectedLineIds: [],
+        history: capped,
+        historyIndex: capped.length - 1,
+      };
+    }),
 }));
 
 function cloneLine(l: Line): Line {
-  return { id: l.id, p1: { x: l.p1.x, y: l.p1.y }, p2: { x: l.p2.x, y: l.p2.y }, groupId: l.groupId };
+  return {
+    id: l.id,
+    p1: { x: l.p1.x, y: l.p1.y },
+    p2: { x: l.p2.x, y: l.p2.y },
+    groupId: l.groupId,
+  };
 }
 
 function cloneGroup(g: Group): Group {
   return { id: g.id, memberIds: [...g.memberIds] };
 }
 
-function capHistory(history: EditorSnapshot[], limit: number): EditorSnapshot[] {
-  if (history.length <= limit) return history;
-  return history.slice(history.length - limit);
+function capHistory(
+  history: EditorSnapshot[],
+  limit: number,
+): EditorSnapshot[] {
+  const safeLimit =
+    Number.isFinite(limit) && limit > 0
+      ? Math.floor(limit)
+      : HISTORY_LIMIT_DEFAULT;
+  if (history.length <= safeLimit) return history;
+  return history.slice(history.length - safeLimit);
 }
 
-
+function makeSnapshot(
+  lines: Line[],
+  groups: Group[],
+  selectedLineIds: string[],
+): EditorSnapshot {
+  return {
+    lines: lines.map(cloneLine),
+    groups: groups.map(cloneGroup),
+    selectedLineIds: [...selectedLineIds],
+  };
+}

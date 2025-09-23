@@ -14,15 +14,26 @@ export function distancePointToPoint(a: Point, b: Point): number {
   return Math.hypot(dx, dy);
 }
 
-export function getSvgPoint(evt: { clientX: number; clientY: number; currentTarget?: any; target?: any }): Point | null {
-  const current = (evt as any).currentTarget as EventTarget & { ownerSVGElement?: SVGSVGElement | null };
-  const svg = (current as SVGSVGElement) instanceof SVGSVGElement
-    ? (current as SVGSVGElement)
-    : (current as any)?.ownerSVGElement || null;
+export function getSvgPoint(evt: {
+  clientX: number;
+  clientY: number;
+  currentTarget?: EventTarget | null;
+}): Point | null {
+  const current = evt.currentTarget as
+    | (EventTarget & { ownerSVGElement?: SVGSVGElement | null })
+    | null;
+  const maybeSvg = current as unknown as
+    | SVGGraphicsElement
+    | SVGSVGElement
+    | null;
+  const svg: SVGSVGElement | null =
+    maybeSvg instanceof SVGSVGElement
+      ? maybeSvg
+      : ((maybeSvg as SVGGraphicsElement | null)?.ownerSVGElement ?? null);
   if (!svg) return null;
   const pt = svg.createSVGPoint();
-  pt.x = (evt as any).clientX;
-  pt.y = (evt as any).clientY;
+  pt.x = evt.clientX;
+  pt.y = evt.clientY;
   const ctm = svg.getScreenCTM();
   if (!ctm) return null;
   const loc = pt.matrixTransform(ctm.inverse());
@@ -39,9 +50,13 @@ export function isPointInRect(p: Point, a: Point, b: Point): boolean {
 
 function segmentsIntersect(p: Point, p2: Point, q: Point, q2: Point): boolean {
   // Based on orientation tests
-  const o = (a: Point, b: Point, c: Point) => Math.sign((b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y));
+  const o = (a: Point, b: Point, c: Point) =>
+    Math.sign((b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y));
   const onSeg = (a: Point, b: Point, c: Point) =>
-    Math.min(a.x, b.x) <= c.x && c.x <= Math.max(a.x, b.x) && Math.min(a.y, b.y) <= c.y && c.y <= Math.max(a.y, b.y);
+    Math.min(a.x, b.x) <= c.x &&
+    c.x <= Math.max(a.x, b.x) &&
+    Math.min(a.y, b.y) <= c.y &&
+    c.y <= Math.max(a.y, b.y);
   const o1 = o(p, p2, q);
   const o2 = o(p, p2, q2);
   const o3 = o(q, q2, p);
@@ -73,5 +88,3 @@ export function doesLineIntersectRect(line: Line, a: Point, b: Point): boolean {
   if (segmentsIntersect(line.p1, line.p2, r4, r1)) return true;
   return false;
 }
-
-
