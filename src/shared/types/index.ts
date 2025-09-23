@@ -8,3 +8,5 @@ export interface EditorSnapshot {
   groups: Group[];
   selectedLineIds: string[];
 }
+
+

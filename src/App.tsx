@@ -1,6 +1,6 @@
-import { Toolbar } from "./components/Toolbar";
-import { Canvas } from "./components/Canvas";
-import { StatusBar } from "./components/StatusBar";
+import { Toolbar } from "./widgets/toolbar";
+import { Canvas } from "./widgets/canvas";
+import { StatusBar } from "./widgets/status-bar";
 
 function App() {
   return (
