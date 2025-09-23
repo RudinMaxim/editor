@@ -104,23 +104,39 @@ export function LineItem({ line, stroke = "#61dafb", strokeWidth = 2, ...rest }:
   
 
   return (
-    <line
-      x1={line.p1.x}
-      y1={line.p1.y}
-      x2={line.p2.x}
-      y2={line.p2.y}
-      onMouseEnter={handleEnter}
-      onMouseLeave={handleLeave}
-      onMouseMove={handleMouseMove}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMoveDrag}
-      onPointerUp={handlePointerUp}
-      onClick={handleClick}
-      style={{ cursor: mode === "delete" ? "pointer" : shiftSelectActive ? "cell" : undefined }}
-      stroke={visualStroke}
-      strokeWidth={visualWidth}
-      {...rest}
-    />
+    <g>
+      {(isHovered || isSelected) && (
+        <line
+          x1={line.p1.x}
+          y1={line.p1.y}
+          x2={line.p2.x}
+          y2={line.p2.y}
+          stroke={isHovered ? "#ffd166" : "#8ecae6"}
+          strokeOpacity={0.35}
+          strokeWidth={typeof strokeWidth === "number" ? strokeWidth + 6 : strokeWidth}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          pointerEvents="none"
+        />
+      )}
+      <line
+        x1={line.p1.x}
+        y1={line.p1.y}
+        x2={line.p2.x}
+        y2={line.p2.y}
+        onMouseEnter={handleEnter}
+        onMouseLeave={handleLeave}
+        onMouseMove={handleMouseMove}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMoveDrag}
+        onPointerUp={handlePointerUp}
+        onClick={handleClick}
+        style={{ cursor: mode === "delete" ? "pointer" : shiftSelectActive ? "cell" : undefined }}
+        stroke={visualStroke}
+        strokeWidth={visualWidth}
+        {...rest}
+      />
+    </g>
   );
 }
 

@@ -8,31 +8,40 @@ const CANVAS_SIZE = 1000; // logical coordinate units
 
 export function Canvas() {
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const { lines, tempStartPoint, tempEndPoint, beginLine, updateTempEnd, commitLine, cancelTemp, mode, setHoverLine, setHoverPoint, showAxes, setShiftSelectActive, shiftSelectActive } = useStore();
+  const { lines, tempStartPoint, tempEndPoint, beginLine, updateTempEnd, commitLine, cancelTemp, mode, setHoverLine, setHoverPoint, showAxes, setShiftSelectActive, shiftSelectActive, beginMarquee, updateMarquee, commitMarquee, marqueeStart, marqueeEnd } = useStore();
 
   const handlePointerDown = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
-    if (mode !== "create") return;
-    if (shiftSelectActive || e.shiftKey) return; // do not start create while selecting
     const loc = getSvgPoint(e);
     if (!loc) return;
+    if (shiftSelectActive || e.shiftKey) {
+      beginMarquee({ x: loc.x, y: loc.y });
+      return;
+    }
+    if (mode !== "create") return;
     beginLine({ x: loc.x, y: loc.y });
-  }, [beginLine, mode, shiftSelectActive]);
+  }, [beginMarquee, beginLine, mode, shiftSelectActive]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
-    if (mode !== "create") return;
-    if (shiftSelectActive || e.shiftKey) return;
-    if (!tempStartPoint) return;
     const loc = getSvgPoint(e);
     if (!loc) return;
+    if (shiftSelectActive || e.shiftKey) {
+      updateMarquee({ x: loc.x, y: loc.y });
+      return;
+    }
+    if (mode !== "create") return;
+    if (!tempStartPoint) return;
     updateTempEnd({ x: loc.x, y: loc.y });
-  }, [mode, tempStartPoint, updateTempEnd, shiftSelectActive]);
+  }, [mode, tempStartPoint, updateTempEnd, shiftSelectActive, updateMarquee]);
 
   const handlePointerUp = useCallback(() => {
+    if (marqueeStart && marqueeEnd) {
+      commitMarquee();
+      return;
+    }
     if (mode !== "create") return;
-    if (shiftSelectActive) return;
     if (!tempStartPoint || !tempEndPoint) return;
     commitLine();
-  }, [commitLine, mode, tempEndPoint, tempStartPoint, shiftSelectActive]);
+  }, [commitLine, commitMarquee, marqueeStart, marqueeEnd, mode, tempEndPoint, tempStartPoint]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<SVGSVGElement>) => {
     if (e.key === "Escape") {
@@ -58,6 +67,15 @@ export function Canvas() {
     return { id: "__temp__", p1: tempStartPoint, p2: tempEndPoint };
   }, [tempEndPoint, tempStartPoint]);
 
+  const marqueeRect = useMemo(() => {
+    if (!marqueeStart || !marqueeEnd) return null;
+    const x = Math.min(marqueeStart.x, marqueeEnd.x);
+    const y = Math.min(marqueeStart.y, marqueeEnd.y);
+    const w = Math.abs(marqueeStart.x - marqueeEnd.x);
+    const h = Math.abs(marqueeStart.y - marqueeEnd.y);
+    return { x, y, w, h };
+  }, [marqueeStart, marqueeEnd]);
+
   return (
     <div style={{ width: "100%", height: "100%", display: "flex" }}>
       <svg
@@ -78,6 +96,9 @@ export function Canvas() {
           <LineItem key={line.id} line={line} stroke="#61dafb" strokeWidth={2} />
         ))}
         {tempLine && <LineItem line={tempLine} stroke="#ffffff" strokeDasharray="6 6" strokeWidth={1.5} />}
+        {marqueeRect && (
+          <rect x={marqueeRect.x} y={marqueeRect.y} width={marqueeRect.w} height={marqueeRect.h} fill="rgba(134, 204, 255, 0.12)" stroke="#8ecae6" strokeDasharray="4 4" strokeWidth={1} pointerEvents="none" />
+        )}
         <g onMouseLeave={() => { setHoverLine(null); setHoverPoint(null); }} />
       </svg>
     </div>

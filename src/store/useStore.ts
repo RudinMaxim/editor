@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { EditorSnapshot, Group, Line, Mode, Point } from "../types";
 import { v4 as uuidv4 } from "uuid";
+import { doesLineIntersectRect } from "../utils/geometry";
 
 interface EditorState {
   mode: Mode;
@@ -15,12 +16,18 @@ interface EditorState {
   dragIds: string[] | null;
   dragLast: Point | null;
   shiftSelectActive: boolean;
+  marqueeStart: Point | null;
+  marqueeEnd: Point | null;
   // history
   history: EditorSnapshot[];
   historyIndex: number;
   historyLimit: number;
   setMode: (mode: Mode) => void;
   setShiftSelectActive: (active: boolean) => void;
+  beginMarquee: (start: Point) => void;
+  updateMarquee: (current: Point) => void;
+  commitMarquee: () => void;
+  cancelMarquee: () => void;
   setHoverPoint: (p: Point | null) => void;
   setHoverLine: (id: string | null) => void;
   toggleAxes: () => void;
@@ -54,11 +61,25 @@ export const useStore = create<EditorState>((set, get) => ({
   dragIds: null,
   dragLast: null,
   shiftSelectActive: false,
+  marqueeStart: null,
+  marqueeEnd: null,
   history: [{ lines: [], groups: [], selectedLineIds: [] }],
   historyIndex: 0,
   historyLimit: 200,
   setMode: (mode) => set({ mode }),
   setShiftSelectActive: (active) => set({ shiftSelectActive: active }),
+  beginMarquee: (start) => set({ marqueeStart: start, marqueeEnd: start }),
+  updateMarquee: (current) => set({ marqueeEnd: current }),
+  commitMarquee: () => set((s) => {
+    if (!s.marqueeStart || !s.marqueeEnd) return {} as any;
+    const a = s.marqueeStart;
+    const b = s.marqueeEnd;
+    const selectedLineIds = s.lines.filter((l) => doesLineIntersectRect(l, a, b)).map((l) => l.id);
+    const baseHistory = s.history.slice(0, s.historyIndex + 1);
+    const snap = { lines: s.lines.map(cloneLine), groups: s.groups.map(cloneGroup), selectedLineIds: [...selectedLineIds] };
+    return { selectedLineIds, marqueeStart: null, marqueeEnd: null, history: [...baseHistory, snap], historyIndex: baseHistory.length };
+  }),
+  cancelMarquee: () => set({ marqueeStart: null, marqueeEnd: null }),
   setHoverPoint: (p) => set({ hoverPoint: p }),
   setHoverLine: (id) => set({ hoverLineId: id }),
   toggleAxes: () => set((s) => ({ showAxes: !s.showAxes })),
