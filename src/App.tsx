@@ -15,8 +15,8 @@ function App() {
       }}
     >
       <Toolbar />
-      <Canvas />
       <StatusBar />
+      <Canvas />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 import type {
   EditorSnapshot,
   Group,
@@ -55,7 +56,9 @@ interface EditorState {
 
 const HISTORY_LIMIT_DEFAULT = 200;
 
-export const useEditorStore = create<EditorState>((set, get) => ({
+export const useEditorStore = create<EditorState>()(
+  persist(
+    (set, get) => ({
   mode: "create",
   lines: [],
   groups: [],
@@ -345,7 +348,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         historyIndex: capped.length - 1,
       };
     }),
-}));
+    }),
+    {
+      name: "editor-store",
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        mode: state.mode,
+        lines: state.lines,
+        groups: state.groups,
+        showAxes: state.showAxes,
+        selectedLineIds: state.selectedLineIds,
+        history: state.history,
+        historyIndex: state.historyIndex,
+        historyLimit: state.historyLimit,
+      }),
+    },
+  ),
+);
 
 function cloneLine(l: Line): Line {
   return {
