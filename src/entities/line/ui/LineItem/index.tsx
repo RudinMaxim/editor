@@ -46,16 +46,16 @@ export function LineItem({
   );
 
   const handleEnter = useCallback(() => {
-    if (mode === "focus") setHoverLine(line.id);
+    if (mode === "edit") setHoverLine(line.id);
   }, [line.id, mode, setHoverLine]);
   const handleLeave = useCallback(() => {
-    if (mode === "focus") setHoverLine(null);
+    if (mode === "edit") setHoverLine(null);
     setHoverPoint(null);
   }, [mode, setHoverLine, setHoverPoint]);
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<SVGLineElement>) => {
-      if (mode !== "focus") return;
+      if (mode !== "edit") return;
       const loc = getSvgPoint(e);
       if (!loc) return;
       const p1 = line.p1;
@@ -79,7 +79,7 @@ export function LineItem({
   }, [groups, hoverLineId, lines]);
 
   const isHovered =
-    mode === "focus" &&
+    mode === "edit" &&
     (hoverLineId === line.id || (hoveredGroupMemberIds?.has(line.id) ?? false));
 
   const selectedWithGroups = useMemo(() => {
@@ -139,6 +139,39 @@ export function LineItem({
     [endDrag, mode],
   );
 
+  const handlePinPointerDown = useCallback(
+    (e: React.PointerEvent<SVGCircleElement>, pin: "p1" | "p2") => {
+      if (mode === "edit") {
+        e.stopPropagation();
+        const loc = getSvgPoint(e);
+        if (!loc) return;
+        (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+        beginDragFromLine(line.id, { x: loc.x, y: loc.y }, pin);
+      }
+    },
+    [beginDragFromLine, line.id, mode],
+  );
+
+  const handlePinPointerMove = useCallback(
+    (e: React.PointerEvent<SVGCircleElement>, pin: "p1" | "p2") => {
+      if (mode !== "edit") return;
+      const loc = getSvgPoint(e);
+      if (!loc) return;
+      updateDrag({ x: loc.x, y: loc.y }, pin);
+    },
+    [mode, updateDrag],
+  );
+
+  const handlePinPointerUp = useCallback(
+    (e: React.PointerEvent<SVGCircleElement>) => {
+      if (mode === "edit") {
+        endDrag();
+        (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
+      }
+    },
+    [endDrag, mode],
+  );
+
   return (
     <g>
       {(isHovered || isSelected) && (
@@ -155,7 +188,32 @@ export function LineItem({
           strokeLinecap="round"
           strokeLinejoin="round"
           pointerEvents="none"
+          style={{ zIndex: 1 }}
         />
+      )}
+      {mode === "edit" && (
+        <>
+          <circle
+            cx={line.p1.x}
+            cy={line.p1.y}
+            r={5}
+            fill="#8ecae6"
+            onPointerDown={(e) => handlePinPointerDown(e, "p1")}
+            onPointerMove={(e) => handlePinPointerMove(e, "p1")}
+            onPointerUp={handlePinPointerUp}
+            style={{ cursor: "pointer", zIndex: 2 }}
+          />
+          <circle
+            cx={line.p2.x}
+            cy={line.p2.y}
+            r={5}
+            fill="#8ecae6"
+            onPointerDown={(e) => handlePinPointerDown(e, "p2")}
+            onPointerMove={(e) => handlePinPointerMove(e, "p2")}
+            onPointerUp={handlePinPointerUp}
+            style={{ cursor: "pointer", zIndex: 2 }}
+          />
+        </>
       )}
       <line
         x1={line.p1.x}
@@ -174,8 +232,9 @@ export function LineItem({
             mode === "delete"
               ? "pointer"
               : shiftSelectActive
-                ? "cell"
-                : undefined,
+              ? "cell"
+              : undefined,
+          zIndex: 1,
         }}
         stroke={visualStroke}
         strokeWidth={visualWidth}

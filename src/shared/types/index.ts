@@ -12,7 +12,7 @@ export interface Group {
   id: string;
   memberIds: string[];
 }
-export type Mode = "create" | "edit" | "delete" | "focus";
+export type Mode = "create" | "edit" | "delete";
 
 export interface EditorSnapshot {
   lines: Line[];

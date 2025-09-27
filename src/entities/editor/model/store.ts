@@ -22,6 +22,7 @@ interface EditorState {
   selectedLineIds: string[];
   dragIds: string[] | null;
   dragLast: Point | null;
+  dragPin: "p1" | "p2" | null;
   shiftSelectActive: boolean;
   marqueeStart: Point | null;
   marqueeEnd: Point | null;
@@ -41,8 +42,8 @@ interface EditorState {
   clearSelection: () => void;
   createGroupFromSelection: () => void;
   ungroupSelected: () => void;
-  beginDragFromLine: (lineId: string, start: Point) => void;
-  updateDrag: (current: Point) => void;
+  beginDragFromLine: (lineId: string, start: Point, pin?: "p1" | "p2") => void;
+  updateDrag: (current: Point, pin?: "p1" | "p2") => void;
   endDrag: () => void;
   undo: () => void;
   redo: () => void;
@@ -70,6 +71,7 @@ export const useEditorStore = create<EditorState>()(
   selectedLineIds: [],
   dragIds: null,
   dragLast: null,
+  dragPin: null,
   shiftSelectActive: false,
   marqueeStart: null,
   marqueeEnd: null,
@@ -100,25 +102,33 @@ export const useEditorStore = create<EditorState>()(
   },
   cancelMarquee: () => set({ marqueeStart: null, marqueeEnd: null }),
   setHoverPoint: (p) => set({ hoverPoint: p }),
-  setHoverLine: (id) => set({ hoverLineId: id }),
+  setHoverLine: (id) => {
+    set((s) => {
+      const hoverLine = s.lines.find((line) => line.id === id);
+      if (hoverLine) {
+        console.log(`Hovering over line: (${hoverLine.p1.x}, ${hoverLine.p1.y}) to (${hoverLine.p2.x}, ${hoverLine.p2.y})`);
+      }
+      return { hoverLineId: id };
+    });
+  },
   toggleAxes: () => set((s) => ({ showAxes: !s.showAxes })),
   toggleSelectLine: (id, additive) =>
     set((s) => {
       const already = s.selectedLineIds.includes(id);
+      let selectedLineIds;
       if (additive) {
-        const selectedLineIds = already
+        selectedLineIds = already
           ? s.selectedLineIds.filter((x) => x !== id)
           : [...s.selectedLineIds, id];
-        const baseHistory = s.history.slice(0, s.historyIndex + 1);
-        const snap = makeSnapshot(s.lines, s.groups, selectedLineIds);
-        return {
-          selectedLineIds,
-          history: [...baseHistory, snap],
-          historyIndex: baseHistory.length,
-        };
+      } else {
+        selectedLineIds = already && s.selectedLineIds.length === 1 ? [] : [id];
       }
-      const selectedLineIds =
-        already && s.selectedLineIds.length === 1 ? [] : [id];
+
+      const selectedLines = s.lines.filter((line) => selectedLineIds.includes(line.id));
+      selectedLines.forEach((line) => {
+        console.log(`Selected line: (${line.p1.x}, ${line.p1.y}) to (${line.p2.x}, ${line.p2.y})`);
+      });
+
       const baseHistory = s.history.slice(0, s.historyIndex + 1);
       const snap = makeSnapshot(s.lines, s.groups, selectedLineIds);
       return {
@@ -199,7 +209,7 @@ export const useEditorStore = create<EditorState>()(
       historyIndex: baseHistory.length,
     });
   },
-  beginDragFromLine: (lineId, start) =>
+  beginDragFromLine: (lineId, start, pin) =>
     set((s) => {
       const line = s.lines.find((l) => l.id === lineId);
       let ids: string[] = [];
@@ -215,24 +225,35 @@ export const useEditorStore = create<EditorState>()(
       } else {
         ids = [lineId];
       }
-      return { dragIds: ids, dragLast: start };
+      return { dragIds: ids, dragLast: start, dragPin: pin };
     }),
-  updateDrag: (current) => {
+  updateDrag: (current, pin) => {
     const { dragIds, dragLast } = get();
     if (!dragIds || !dragLast) return;
     const dx = current.x - dragLast.x;
     const dy = current.y - dragLast.y;
     if (dx === 0 && dy === 0) return;
     set((s) => ({
-      lines: s.lines.map((l) =>
-        dragIds.includes(l.id)
-          ? {
-              ...l,
-              p1: { x: l.p1.x + dx, y: l.p1.y + dy },
-              p2: { x: l.p2.x + dx, y: l.p2.y + dy },
-            }
-          : l,
-      ),
+      lines: s.lines.map((l) => {
+        if (!dragIds.includes(l.id)) return l;
+        if (pin === "p1") {
+          return {
+            ...l,
+            p1: { x: l.p1.x + dx, y: l.p1.y + dy },
+          };
+        } else if (pin === "p2") {
+          return {
+            ...l,
+            p2: { x: l.p2.x + dx, y: l.p2.y + dy },
+          };
+        } else {
+          return {
+            ...l,
+            p1: { x: l.p1.x + dx, y: l.p1.y + dy },
+            p2: { x: l.p2.x + dx, y: l.p2.y + dy },
+          };
+        }
+      }),
     }));
     set({ dragLast: current });
   },

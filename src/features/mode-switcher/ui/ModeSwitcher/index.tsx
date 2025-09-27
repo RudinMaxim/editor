@@ -1,7 +1,7 @@
 import { useEditorStore } from "../../../../entities/editor";
 import type { Mode } from "../../../../shared/types";
 
-const modes: Mode[] = ["create", "edit", "delete", "focus"];
+const modes: Mode[] = ["create", "edit", "delete"];
 
 export function ModeSwitcher() {
   const { mode, setMode } = useEditorStore();
